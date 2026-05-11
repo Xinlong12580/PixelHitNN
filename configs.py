@@ -2,20 +2,20 @@ common = {
     "pitch_x" : 150.0, # microns
     "pitch_y" : 100.0, # microns
     "batch_size" : 4096,
-    "epochs" : 200,
+    "epochs" : 500,
     "loss_name": "nll_loss",
     "input_file": "test_clusters.root",
     "debug_predictions": False,
     }
 
-layer_configs = {
-    "L1U" : {
-        "checkpoint_x" : "checkpoints/L1U_x.weights.h5",
-        "checkpoint_y" : "checkpoints/L1U_y.weights.h5",
-        "model_dest_x": "checkpoints/L1U_x.keras",
-        "model_dest_y": "checkpoints/L1U_y.keras",
+layer_configs = {}
+for layer in ["L1U","L1F","L2","L3M","L3P","L4M","L4P"]:
+    layer_configs[layer] = {
+        "checkpoint_x" : f"checkpoints/{layer}_x.weights.h5",
+        "checkpoint_y" : f"checkpoints/{layer}_y.weights.h5",
+        "model_dest_x": f"checkpoints/{layer}_x.keras",
+        "model_dest_y": f"checkpoints/{layer}_y.keras",
     }
-}
 
 # Filter rules for each layer/module type (BPIX only for now).
 # Each entry is a lambda that accepts arrays (Layer, Ladder, Module)
