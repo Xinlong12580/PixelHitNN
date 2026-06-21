@@ -3,11 +3,12 @@ import os
 import uproot
 import numpy as np
 import tensorflow as tf
-
+import json
 from configs import common, layer_configs, layer_filter_rules
+from tensorflow.keras.layers import Input
 from models import architectures, losses
 import plotting
-
+import cmsml
 
 class Trainer:
     def __init__(self, layer, axis):
@@ -29,15 +30,15 @@ class Trainer:
         self.loss_name = self.config.get("loss_name")
         self.modelname = self.config.get("modelname", "baseline_model")
         self.pitch = self.config.get(f"pitch_{axis}")
-        self.checkpoint = self.config.get(f"checkpoint_{axis}")
-        self.model_dest = self.config.get(f"model_dest_{axis}", f"checkpoints/{self.layer}_{self.axis}.keras")
+        self.first_guess = self.config.get("first_guess")
+        self.checkpoint = self.config.get(f"checkpoint_{axis}", f"checkpoints/{self.layer}_{self.axis}_{self.first_guess}.weights.h5" )
+        self.model_dest = self.config.get(f"model_dest_{axis}", f"checkpoints/{self.layer}_{self.axis}_{self.first_guess}.keras")
         self.debug_predictions = bool(self.config.get("debug_predictions", False))
         self.input_file = self.config.get("input_file")
         self.output_scale = self.config.get("output_scale")
-        self.first_guess = self.config.get("first_guess")
         self.input_prepared = False
         self.model = None
-
+        
     def _ensure_model_loaded(self):
         """Lazily load the model if it hasn't been trained or loaded yet.
 
@@ -101,6 +102,49 @@ class Trainer:
                 raise ValueError(f"{branch_name}[{idx}] has no SimHit entries.")
             first_values[idx] = np.float32(flat[0])
         return first_values.reshape(-1, 1)
+    
+    def _def_simhit(self, values, branch_name, reference):
+        print(np.shape(reference))
+        if type(reference) == str and reference == "first":
+            return self._first_simhit_per_event(values, branch_name)
+        else:
+            best_values = np.empty(len(values), dtype=np.float32)
+            for idx, event_values in enumerate(values):
+                arr = np.asarray(event_values)
+                flat = arr.reshape(-1)
+                diffs = [abs(diff) for diff in (flat - reference[idx]) ]
+                best_idx = np.argmin(diffs)
+                if flat.size == 0:
+                    raise ValueError(f"{branch_name}[{idx}] has no SimHit entries.")
+                best_values[idx] = np.float32(flat[best_idx])
+            return best_values.reshape(-1, 1)
+
+    def debug_input(self, train_split=0.9, seed=42):
+        if not self.input_file:
+            raise ValueError("Missing 'input_file' in configuration.")
+        if self.layer not in layer_filter_rules:
+            raise KeyError(f"No filter rule defined for layer '{self.layer}'.")
+
+        print(f"Opening ROOT file: {self.input_file}")
+        with uproot.open(self.input_file) as root_file:
+            tree = root_file["Events"]
+
+            needed_branches = [
+                "Layer", "Ladder", "Module",
+                "CotAlpha", "CotBeta",
+                "ClusterCenter_x", "ClusterCenter_y",
+                "Cluster_charge",
+                "Cluster", "Cluster_x", "Cluster_y",
+                "SimHit_x", "SimHit_y", "Generic_x", "Generic_y", "Template_x", "Template_y"
+            ]
+            print(f"Reading {len(needed_branches)} branches from {tree.num_entries} entries...")
+            data = tree.arrays(needed_branches, library="np")
+
+        # --- Layer / module filter ---
+        filter_fn = layer_filter_rules[self.layer]
+        mask = filter_fn(data["Layer"], data["Ladder"], data["Module"])
+        n_total = mask.sum()
+        print(f"Clusters passing '{self.layer}' filter: {n_total} / {len(mask)}")
 
     def prepare_train_test_input(self, train_split=0.9, seed=42):
         if not self.input_file:
@@ -118,7 +162,7 @@ class Trainer:
                 "ClusterCenter_x", "ClusterCenter_y",
                 "Cluster_charge",
                 "Cluster", "Cluster_x", "Cluster_y",
-                "SimHit_x", "SimHit_y", "Generic_x", "Generic_y"
+                "SimHit_x", "SimHit_y", "Generic_x", "Generic_y", "Template_x", "Template_y"
             ]
             print(f"Reading {len(needed_branches)} branches from {tree.num_entries} entries...")
             data = tree.arrays(needed_branches, library="np")
@@ -144,6 +188,8 @@ class Trainer:
         simhit_y      = apply("SimHit_y") * self.output_scale 
         generic_x      = apply("Generic_x") * self.output_scale 
         generic_y      = apply("Generic_y") * self.output_scale 
+        template_x      = apply("Template_x") * self.output_scale 
+        template_y      = apply("Template_y") * self.output_scale 
 
         print("\n--- Sanity check: Print properties of first 5 clusters ---")
         n_check = min(5, n_total)
@@ -179,6 +225,7 @@ class Trainer:
         self.cot_alpha_train,      self.cot_alpha_test      = split(cot_alpha)
         self.cot_beta_train,       self.cot_beta_test       = split(cot_beta)
         self.cluster_x_train,      self.cluster_x_test      = split(cluster_x)
+        self.cluster_2d_train,      self.cluster_2d_test      = split(cluster_2d)
         self.cluster_y_train,      self.cluster_y_test      = split(cluster_y)
         self.center_x_train,       self.center_x_test       = split(center_x)
         self.center_y_train,       self.center_y_test       = split(center_y)
@@ -187,10 +234,16 @@ class Trainer:
         self.simhit_y_train,       self.simhit_y_test       = split(simhit_y)
         self.generic_x_train,       self.generic_x_test       = split(generic_x)
         self.generic_y_train,       self.generic_y_test       = split(generic_y)
+        self.template_x_train,       self.template_x_test       = split(template_x)
+        self.template_y_train,       self.template_y_test       = split(template_y)
 
         print(f"Train / test split: {n_train} / {n_total - n_train} clusters")
         self.input_prepared = True
 
+    def debug_inputs(self):
+        print(self.cluster_x_test[0])
+        print(self.cluster_y_test[0])
+        print(self.cluster_2d_test[0])
 
     def train(self, validation_split=0.02):
         if not self.input_prepared:
@@ -210,11 +263,15 @@ class Trainer:
         generic_train = np.asarray(self.generic_x_train if self.axis == "x" else self.generic_y_train, dtype=np.float32).reshape(-1, 1)
         generic_test = np.asarray(self.generic_x_test if self.axis == "x" else self.generic_y_test, dtype=np.float32).reshape(-1, 1)
         if self.axis == "x":
-            simhit_train = self._first_simhit_per_event(self.simhit_x_train, "SimHit_x_train")
-            simhit_test = self._first_simhit_per_event(self.simhit_x_test, "SimHit_x_test")
+            #simhit_train = self._first_simhit_per_event(self.simhit_x_train, "SimHit_x_train")
+            #simhit_test = self._first_simhit_per_event(self.simhit_x_test, "SimHit_x_test")
+            simhit_train = self._def_simhit(self.simhit_x_train, "SimHit_x_train", self.center_x_train)
+            simhit_test = self._def_simhit(self.simhit_x_test, "SimHit_x_test", self.center_x_test)
         else:
-            simhit_train = self._first_simhit_per_event(self.simhit_y_train, "SimHit_y_train")
-            simhit_test = self._first_simhit_per_event(self.simhit_y_test, "SimHit_y_test")
+            #simhit_train = self._first_simhit_per_event(self.simhit_y_train, "SimHit_y_train")
+            #simhit_test = self._first_simhit_per_event(self.simhit_y_test, "SimHit_y_test")
+            simhit_train = self._def_simhit(self.simhit_y_train, "SimHit_y_train", self.center_y_train)
+            simhit_test = self._def_simhit(self.simhit_y_test, "SimHit_y_test", self.center_y_test)
 
         # Final hit position is cluster center + NN prediction, so we train the NN to predict the offset from the cluster center to the SimHit position.
         if self.first_guess == "center":
@@ -285,6 +342,8 @@ class Trainer:
             os.makedirs(model_dir, exist_ok=True)
         print(f"Saving full model to: {self.model_dest}")
         model.save(self.model_dest)
+        #cmsml.tensorflow.save_graph(self.model_dest+".pb", model, variables_to_constants=True)
+        #cmsml.tensorflow.save_graph(self.model_dest+".pb.txt", model, variables_to_constants=True)
 
         pred_train = model.predict([x_train[:, :, np.newaxis], angles_train, charge_train], batch_size=self.batch_size, verbose=0)
         pred_test = model.predict([x_test[:, :, np.newaxis], angles_test, charge_test], batch_size=self.batch_size, verbose=0)
@@ -306,11 +365,35 @@ class Trainer:
         self.test_target_offset = target_offset_test
 
         os.makedirs("plots", exist_ok=True)
-        history_plot = f"plots/{self.layer}_{self.axis}_history.png"
+        history_plot = f"plots/NNwith{self.first_guess}_{self.layer}_{self.axis}_history.png"
         plotting.plot_dnn_loss(history.history, history_plot)
-        plotting.plot_nll_and_mse(history.history, f"plots/{self.layer}_{self.axis}")
-
+        plotting.plot_nll_and_mse(history.history, f"plots/NNwith{self.first_guess}_{self.layer}_{self.axis}")
+        
         print(f"Training done: {len(x_train)} train / {len(x_test)} test clusters")
+
+        self.save_model(model, input_len)
+
+
+    def save_model(self, model, input_len):
+        @tf.function(input_signature=[
+            tf.TensorSpec(shape=[None, input_len, 1], dtype=tf.float32,
+                          name=f"pixel_projection_{self.axis}"),
+            tf.TensorSpec(shape=[None, 2], dtype=tf.float32,
+                          name="angles"),
+            tf.TensorSpec(shape=[None, 1], dtype=tf.float32,
+                          name="cluster_charge"),
+        ])
+        def serving_fn(pixel_projection, angles, cluster_charge):
+            y = model([pixel_projection, angles, cluster_charge], training=False)
+            return {"output": y}
+        concrete_fn = serving_fn.get_concrete_function()
+
+        cmsml.tensorflow.save_graph( self.model_dest + ".pb", concrete_fn, variables_to_constants=True)
+        cmsml.tensorflow.save_graph( self.model_dest + ".pb.txt", concrete_fn, variables_to_constants=True)
+
+
+
+
 
     def test(self):
         if not self.input_prepared:
@@ -324,9 +407,11 @@ class Trainer:
         center_test = np.asarray(self.center_x_test if self.axis == "x" else self.center_y_test, dtype=np.float32).reshape(-1, 1)
         generic_test = np.asarray(self.generic_x_test if self.axis == "x" else self.generic_y_test, dtype=np.float32).reshape(-1, 1)
         if self.axis == "x":
-            simhit_test = self._first_simhit_per_event(self.simhit_x_test, "SimHit_x_test")
+            #simhit_test = self._first_simhit_per_event(self.simhit_x_test, "SimHit_x_test")
+            simhit_test = self._def_simhit(self.simhit_x_test, "SimHit_x_test", self.center_x_test)
         else:
-            simhit_test = self._first_simhit_per_event(self.simhit_y_test, "SimHit_y_test")
+            #simhit_test = self._first_simhit_per_event(self.simhit_y_test, "SimHit_y_test")
+            simhit_test = self._def_simhit(self.simhit_y_test, "SimHit_y_test", self.center_y_test)
 
         if self.first_guess == "center":
             target_offset_test = simhit_test - center_test
@@ -362,7 +447,19 @@ class Trainer:
         plotting.plot_residuals(residuals, residuals_output_file, plot_type="Residuals", name=plot_name)
         plotting.plot_residuals(pulls, pulls_output_file, plot_type="Pulls", name=plot_name)
         plotting.plot_uncertainties(uncertainties, f"plots/NNwith{self.first_guess}_{self.layer}_{self.axis}_uncertainties.pdf")
-
+        #self.saveResults("test.txt", ["cot_alpha", "cot_beta", "center_x", "center_y", "cluster_charge", "simhit_x", "simhit_y", "generic_x", "generic_y", "template_x", "template_y", "residuals"], self.cot_alpha_test, self.cot_beta_test, self.center_x_test, self.center_y_test, self.cluster_charge_test, self._first_simhit_per_event(self.simhit_x_test, "SimHit_x_test"), self._first_simhit_per_event(self.simhit_y_test, "SimHit_y_test"), self.generic_x_test, self.generic_y_test, self.template_x_test, self.template_y_test, residuals)
+        simhit_x_test = self._def_simhit(self.simhit_x_test, "SimHit_x_test", self.center_x_test)[:,0]
+        simhit_y_test = self._def_simhit(self.simhit_y_test, "SimHit_y_test", self.center_y_test)[:,0]
+        residuals_template_x = ( self.template_x_test -  simhit_x_test ) * conversion_to_microns 
+        residuals_template_y = ( self.template_y_test -  simhit_y_test ) * conversion_to_microns   
+        residuals_center_x = ( self.center_x_test -  simhit_x_test ) * conversion_to_microns   
+        residuals_center_y = ( self.center_y_test -  simhit_y_test ) * conversion_to_microns   
+        residuals_generic_x = ( self.generic_x_test -  simhit_x_test ) * conversion_to_microns   
+        residuals_generic_y = ( self.generic_y_test -  simhit_y_test ) * conversion_to_microns   
+        simhit_x_test = simhit_x_test * conversion_to_microns
+        simhit_y_test = simhit_y_test * conversion_to_microns
+        self.saveResults(f"results_NNwith{self.first_guess}_{self.layer}_{self.axis}.txt", ["cot_alpha", "cot_beta", "center_x", "center_y", "cluster_charge", "simhit_x", "simhit_y", "generic_x", "generic_y", "template_x", "template_y", "residuals", "residuals_template_x", "residuals_generic_x", "residuals_center_x", "residuals_template_y", "residuals_generic_y", "residuals_center_y"], self.cot_alpha_test, self.cot_beta_test, self.center_x_test, self.center_y_test, self.cluster_charge_test, simhit_x_test, simhit_y_test, self.generic_x_test, self.generic_y_test, self.template_x_test, self.template_y_test, residuals, residuals_template_x,  residuals_generic_x, residuals_center_x, residuals_template_y,  residuals_generic_y, residuals_center_y)
+    
     def visualize(self, n_to_plot=10):
         if not self.input_prepared:
             self.prepare_train_test_input()
@@ -382,9 +479,11 @@ class Trainer:
             dtype=np.float32,
         ).reshape(-1, 1)
         if self.axis == "x":
-            simhit_test = self._first_simhit_per_event(self.simhit_x_test, "SimHit_x_test")
+            #simhit_test = self._first_simhit_per_event(self.simhit_x_test, "SimHit_x_test")
+            simhit_test = self._def_simhit(self.simhit_x_test, "SimHit_x_test", self.center_x_test)
         else:
-            simhit_test = self._first_simhit_per_event(self.simhit_y_test, "SimHit_y_test")
+            #simhit_test = self._first_simhit_per_event(self.simhit_y_test, "SimHit_y_test")
+            simhit_test = self._def_simhit(self.simhit_y_test, "SimHit_y_test", self.center_y_test)
         if self.first_guess == "center":
             target_offset_test = (simhit_test - center_test) * 1e4 / self.output_scale 
         elif self.first_guess == "generic":
@@ -411,24 +510,36 @@ class Trainer:
         os.makedirs("plots", exist_ok=True)
         plotting.plot_clusters(plotting_data_sets, plotting_file_name)
 
+    def saveResults(self, filename, columnnames, *columns):
+        _dict = {}
+        for i in range(len(columnnames)):
+            _dict[columnnames[i]] = columns[i].tolist()
+        with open(filename, "w") as f:
+            json.dump(_dict, f, indent = 4)
+
     def plot_otherMethods(self):
-        simhit_y = self._first_simhit_per_event(self.simhit_y_test, "SimHit_y_train")[:,0]
+        simhit_y = self._def_simhit(self.simhit_y_test, "SimHit_y_test", self.center_y_test)[:,0]
         residuals_center_y = ( self.center_y_test - simhit_y ) * 1e4 / self.output_scale 
         residuals_generic_y = ( self.generic_y_test - simhit_y ) * 1e4 / self.output_scale
-        plotting.plot_residuals(residuals_center_y, f"plots/center_{self.layer}_y_residuals.pdf" , plot_type="Residuals", name=f"center_y")
-        plotting.plot_residuals(residuals_generic_y, f"plots/generic_{self.layer}_y_residuals.pdf", plot_type="Residuals", name=f"generic_y")
+        residuals_template_y = ( self.template_y_test - simhit_y ) * 1e4 / self.output_scale
+        plotting.plot_residuals(residuals_center_y, f"plots/center_{self.layer}_y_residuals.pdf" , plot_type="Residuals", name=f"center_{self.layer}_y")
+        plotting.plot_residuals(residuals_generic_y, f"plots/generic_{self.layer}_y_residuals.pdf", plot_type="Residuals", name=f"generic_{self.layer}_y")
+        plotting.plot_residuals(residuals_template_y, f"plots/template_{self.layer}_y_residuals.pdf", plot_type="Residuals", name=f"template_{self.layer}_y")
         
-        simhit_x = self._first_simhit_per_event(self.simhit_x_test, "SimHit_x_train")[:,0]
+        simhit_x = self._def_simhit(self.simhit_x_test, "SimHit_x_test", self.center_x_test)[:,0]
         residuals_center_x = ( self.center_x_test - simhit_x ) * 1e4 / self.output_scale
         residuals_generic_x = ( self.generic_x_test - simhit_x ) * 1e4 / self.output_scale
-        plotting.plot_residuals(residuals_center_x, f"plots/center_{self.layer}_x_residuals.pdf" , plot_type="Residuals", name=f"center_x")
-        plotting.plot_residuals(residuals_generic_x, f"plots/generic_{self.layer}_x_residuals.pdf", plot_type="Residuals", name=f"generic_x")
+        residuals_template_x = ( self.template_x_test - simhit_x ) * 1e4 / self.output_scale
+        plotting.plot_residuals(residuals_center_x, f"plots/center_{self.layer}_x_residuals.pdf" , plot_type="Residuals", name=f"center_{self.layer}_x")
+        plotting.plot_residuals(residuals_generic_x, f"plots/generic_{self.layer}_x_residuals.pdf", plot_type="Residuals", name=f"generic_{self.layer}_x")
+        plotting.plot_residuals(residuals_template_x, f"plots/template_{self.layer}_x_residuals.pdf", plot_type="Residuals", name=f"template_{self.layer}_x")
 
 
 if __name__ == "__main__":
     trainer = Trainer(layer="L1U", axis="y")
     trainer.prepare_train_test_input()
-    trainer.train()
-    trainer.test()
-    trainer.plot_otherMethods()
-    trainer.visualize()
+    trainer.debug_inputs()
+    #trainer.train()
+    #trainer.test()
+    #trainer.plot_otherMethods()
+    #trainer.visualize()
