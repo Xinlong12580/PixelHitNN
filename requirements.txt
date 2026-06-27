@@ -1,7 +1,8 @@
-tensorflow
 numpy
 h5py
 matplotlib
 psutil
 uproot
 scipy
+cmsml
+tensorflow[and-cuda]==2.18.0

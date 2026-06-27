@@ -4,22 +4,22 @@ common = {
     "batch_size" : 256,
     "epochs" : 5000,
     "loss_name": "nll_loss",
-    "input_file": "test_clusters.root",
+    "input_file": "test.root",
     "debug_predictions": False,
     "modelname": "conv_model",
     "output_scale": 50.,
     "first_guess": "center", # 'center' or 'generic'
+    #"first_guess": "generic", # 'center' or 'generic'
     }
 
 layer_configs = {}
 for layer in ["L1U","L1F","L2","L3M","L3P","L4M","L4P"]:
     layer_configs[layer] = {
-        "checkpoint_x" : f"checkpoints/{layer}_x.weights.h5",
-        "checkpoint_y" : f"checkpoints/{layer}_y.weights.h5",
-        "model_dest_x": f"checkpoints/{layer}_x.keras",
-        "model_dest_y": f"checkpoints/{layer}_y.keras",
+        #"checkpoint_x" : f"checkpoints/{layer}_x.weights.h5",
+        #"checkpoint_y" : f"checkpoints/{layer}_y.weights.h5",
+        #"model_dest_x": f"checkpoints/{layer}_x.keras",
+        #"model_dest_y": f"checkpoints/{layer}_y.keras",
     }
-
 # Filter rules for each layer/module type (BPIX only for now).
 # Each entry is a lambda that accepts arrays (Layer, Ladder, Module)
 # and returns a boolean mask selecting the matching clusters.

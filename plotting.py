@@ -76,28 +76,36 @@ def gaussian(x, amplitude, mean, stddev):
     return amplitude * np.exp(-((x - mean) / stddev)**2 / 2)
 
 def fit_gaussian(data, bins_centers,initial_params = [1.,0.,1.]):
-    params, covariance = curve_fit(gaussian, bins_centers, data, p0=initial_params)
+    params, covariance = curve_fit(gaussian, bins_centers, data, p0=initial_params, bounds = ([-np.inf, -np.inf, 0], [np.inf, np.inf, np.inf]))
     amplitude, mean, stddev = params
     return amplitude, mean, stddev
+def calculate_RMS(residuals):
+    RMS = 0.
+    for residual in residuals:
+        RMS += residual*residual
+    RMS = np.sqrt(RMS / len(residuals))
+    return RMS
 
-def plot_residuals(residuals, output_file, plot_type="Residuals",name=""):
+def plot_residuals(residuals, output_file, plot_type="Residuals",name="", do_density = False):
     if plot_type == "Residuals":
         bins = np.linspace(-300, 300, 100)  # microns
-        initial_params = [1., 0., 100.]  # Amplitude, mean, width
+        #initial_params = [1., 0., 100.]  # Amplitude, mean, width
     elif plot_type == "Pulls":
         bins = np.linspace(-5, 5, 100)
-        initial_params = [1., 0., 1.]  # Amplitude, mean, width
+        #initial_params = [1., 0., 1.]  # Amplitude, mean, width
     else:
         raise ValueError(f"Invalid plot_type '{plot_type}'. Allowed choices are 'Residuals' or 'Pulls' ")
 
     legend_label = f"{name} {plot_type}"
-    n, bins, patches = plt.hist(residuals, bins=bins, density=True, alpha=0.7, color='lightblue', edgecolor='black',label=legend_label)
+    #n, bins, patches = plt.hist(residuals, bins=bins, density=True, alpha=0.7, color='lightblue', edgecolor='black',label=legend_label)
+    n, bins, patches = plt.hist(residuals, bins=bins, density=do_density, alpha=0.7, color='lightblue', edgecolor='black',label=legend_label)
 
-    threshold = 200  # microns or units matching your data
+    initial_params = [max(n), 0., 1.]  # Amplitude, mean, width
+    threshold = 300  # microns or units matching your data
     residuals = np.array(residuals)
     fraction_above_threshold = np.mean(np.abs(residuals) > threshold)
     print(f"Fraction of residuals with |value| > {threshold} um: {fraction_above_threshold:.4f}")
-
+    residuals = [residual for residual in residuals if np.abs(residual) < threshold]
 
     bins_centers = 0.5 * (bins[:-1] + bins[1:])
     # Plot Gaussian fit
@@ -106,7 +114,10 @@ def plot_residuals(residuals, output_file, plot_type="Residuals",name=""):
         fit_curve = gaussian(bins_centers, amplitude, mean, stddev)
         plt.plot(bins_centers, fit_curve, 'r--', label='Gaussian Fit')
             # Print fit parameters
-        fit_params_str = f'Mean: {mean:.2f}\nStd Deviation: {stddev:.2f}'
+        RMS = calculate_RMS(residuals)
+        fit_params_str = f'NEvents: {len(residuals)}\nMean: {mean:.2f}\nGaussian Sigma: {stddev:.2f}\n RMS: {RMS:.2f}\n Stddev: {np.std(residuals):.2f}'
+        print(fit_params_str)
+        #fit_params_str = f'Mean: {mean:.2f}\nSigma: {stddev:.2f}\n '
         plt.text(0.2, 0.9, fit_params_str, transform=plt.gca().transAxes,
              bbox=dict(facecolor='white', alpha=0.5,edgecolor="none"), horizontalalignment='center', verticalalignment='top')
     except Exception as e:

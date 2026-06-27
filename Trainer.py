@@ -1,5 +1,5 @@
 import os
-
+import time
 import uproot
 import numpy as np
 import tensorflow as tf
@@ -417,9 +417,11 @@ class Trainer:
             target_offset_test = simhit_test - center_test
         elif self.first_guess == "generic":
             target_offset_test = simhit_test - generic_test
+        start = time.perf_counter_ns()
         pred = self.model.predict([x_test[:, :, np.newaxis], angles_test, charge_test], batch_size=self.batch_size, verbose=0)
         self.pred = pred
-
+        end = time.perf_counter_ns()
+        print("TIME: ", end - start, "N", len(self.pred))
         residuals_native = pred[:, 0] - target_offset_test[:, 0] # native == in cm
         uncertainty_native = pred[:, 1]
         conversion_to_microns = 1e4 / self.output_scale
