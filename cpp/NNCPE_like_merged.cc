@@ -37,6 +37,9 @@ int main() {
 
     // Create session options
     tensorflow::SessionOptions options;
+    options.config.mutable_graph_options()
+    ->mutable_optimizer_options()
+    ->set_global_jit_level(tensorflow::OptimizerOptions::ON_1);
     auto* rewrite_options =options.config.mutable_graph_options()->mutable_rewrite_options();
 
     rewrite_options->set_constant_folding(tensorflow::RewriterConfig::ON);
