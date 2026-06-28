@@ -43,12 +43,12 @@ def baseline_model(inputs, angles, charges, input_dim, dropout_level=0.10):
 def conv_model(inputs, angles, charges, input_dim, dropout_level=0.10):
     x = tf.keras.layers.Conv1D(32, kernel_size=3, padding="same")(inputs)
     x = tf.keras.layers.LeakyReLU(negative_slope=0.01)(x)
-    x = tf.keras.layers.BatchNormalization(axis=-1)(x)
+    #x = tf.keras.layers.BatchNormalization(axis=-1)(x)
     x = tf.keras.layers.Dropout(dropout_level)(x)
 
     x = tf.keras.layers.Conv1D(32, kernel_size=3, padding="same")(x)
     x = tf.keras.layers.LeakyReLU(negative_slope=0.01)(x)
-    x = tf.keras.layers.BatchNormalization(axis=-1)(x)
+    #x = tf.keras.layers.BatchNormalization(axis=-1)(x)
     x = tf.keras.layers.Dropout(dropout_level)(x)
 
     x = tf.keras.layers.GlobalAveragePooling1D()(x)  # replaces Flatten
@@ -61,7 +61,7 @@ def conv_model(inputs, angles, charges, input_dim, dropout_level=0.10):
     position = tf.keras.layers.LeakyReLU(negative_slope=0.01)(position)
     position = tf.keras.layers.Dense(4 * input_dim)(position)
     position = tf.keras.layers.LeakyReLU(negative_slope=0.01)(position)
-    position = tf.keras.layers.BatchNormalization()(position)
+    #position = tf.keras.layers.BatchNormalization()(position)
     position = tf.keras.layers.Dropout(dropout_level)(position)
 
     position_res = tf.keras.layers.Add()([position, tf.keras.layers.Dense(4 * input_dim)(concat_inputs)])
@@ -72,7 +72,7 @@ def conv_model(inputs, angles, charges, input_dim, dropout_level=0.10):
     uncertainty = tf.keras.layers.LeakyReLU(negative_slope=0.01)(uncertainty)
     uncertainty = tf.keras.layers.Dense(4 * input_dim)(uncertainty)
     uncertainty = tf.keras.layers.LeakyReLU(negative_slope=0.01)(uncertainty)
-    uncertainty = tf.keras.layers.BatchNormalization()(uncertainty)
+    #uncertainty = tf.keras.layers.BatchNormalization()(uncertainty)
     uncertainty = tf.keras.layers.Dropout(dropout_level)(uncertainty)
 
     uncertainty_res = tf.keras.layers.Add()([uncertainty, tf.keras.layers.Dense(4 * input_dim)(concat_inputs)])

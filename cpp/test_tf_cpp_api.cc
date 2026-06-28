@@ -8,6 +8,7 @@
 
 int main() {
     std::cout << "Testing TensorFlow C++ API\n";
+
     tensorflow::SessionOptions options;
     options.config.set_allow_soft_placement(true);
     options.config.set_log_device_placement(true);
@@ -91,4 +92,3 @@ int main() {
     session->Close();
     return 0;
 }
-                             

@@ -1,4 +1,4 @@
-g++ -std=c++17 test_tf_cpp_api.cc -o test_tf_cpp_api \
+g++ -std=c++17 "$1".cc -o $1 \
   $TF_CFLAGS \
   -I"$TF_INC" \
   -L"$TF_LIB" \
