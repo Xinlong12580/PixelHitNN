@@ -51,7 +51,9 @@ def conv_model(inputs, angles, charges, input_dim, dropout_level=0.10):
     #x = tf.keras.layers.BatchNormalization(axis=-1)(x)
     x = tf.keras.layers.Dropout(dropout_level)(x)
 
-    x = tf.keras.layers.GlobalAveragePooling1D()(x)  # replaces Flatten
+    
+    #x = tf.keras.layers.GlobalAveragePooling1D()(x)  # replaces Flatten
+    x = tf.keras.layers.Flatten()(x)
 
     concat_list = [x, angles, charges]
     concat_inputs = tf.keras.layers.concatenate(concat_list)

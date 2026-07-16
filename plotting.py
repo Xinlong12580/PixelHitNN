@@ -98,14 +98,15 @@ def plot_residuals(residuals, output_file, plot_type="Residuals",name="", do_den
 
     legend_label = f"{name} {plot_type}"
     #n, bins, patches = plt.hist(residuals, bins=bins, density=True, alpha=0.7, color='lightblue', edgecolor='black',label=legend_label)
-    n, bins, patches = plt.hist(residuals, bins=bins, density=do_density, alpha=0.7, color='lightblue', edgecolor='black',label=legend_label)
+    #n, bins, patches = plt.hist(residuals, bins=bins, density=do_density, alpha=0.7, color='lightblue', edgecolor='black',label=legend_label)
+    n, bins, patches = plt.hist(residuals, bins=bins, density=do_density, alpha=0.7, edgecolor='black',label=legend_label)
 
     initial_params = [max(n), 0., 1.]  # Amplitude, mean, width
     threshold = 300  # microns or units matching your data
     residuals = np.array(residuals)
     fraction_above_threshold = np.mean(np.abs(residuals) > threshold)
     print(f"Fraction of residuals with |value| > {threshold} um: {fraction_above_threshold:.4f}")
-    residuals = [residual for residual in residuals if np.abs(residual) < threshold]
+    #residuals = [residual for residual in residuals if np.abs(residual) < threshold]
 
     bins_centers = 0.5 * (bins[:-1] + bins[1:])
     # Plot Gaussian fit
